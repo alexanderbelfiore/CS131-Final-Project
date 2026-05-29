@@ -126,6 +126,37 @@ Key tasks:
 
 For the two-week version, simple nearest-neighbor association plus linear interpolation is likely enough. More advanced tracking can remain a stretch goal.
 
+Tracking design (recommended implementation):
+
+1. Run YOLO detections independently per frame.
+2. Project each detection's bottom-center point into field coordinates (yards or meters).
+3. Predict each active track's next position with a constant-velocity Kalman filter.
+4. Build a track-to-detection cost matrix using field-space distance as the primary term.
+5. Solve assignment with Hungarian matching, then reject matches beyond a gating threshold.
+6. Keep unmatched tracks in a short "lost" state for `max_gap_frames`.
+7. Reactivate a lost track with the same ID if a nearby detection reappears within the gap window.
+8. Interpolate missing coordinates only for short gaps and only when both endpoints belong to the same track ID.
+
+Why this works for sports footage:
+
+- YOLO does not persist identity across frames by itself; tracking is required.
+- Player orientation can change rapidly, but short-horizon field position and velocity are smoother than appearance.
+- Projecting to field coordinates makes association more stable than using raw pixel coordinates.
+
+Suggested defaults to start:
+
+- `match_gate_yards`: 1.5 to 3.0 (tune by FPS and motion speed)
+- `max_gap_frames`: 3 to 6
+- `interp_max_gap_frames`: 2 to 5
+- `min_track_length`: 3 frames
+- `new_track_conf`: higher threshold than continuation threshold
+
+Interpolation policy:
+
+- Use linear interpolation for short, confident gaps within a single track.
+- Mark each filled row with `is_interpolated = true`.
+- Do not interpolate long gaps or ambiguous re-identifications.
+
 ### 6. Visualization
 
 Render a top-down ultimate field and plot player positions for each processed frame.
@@ -160,6 +191,8 @@ Likely tools:
 - OpenCV for video I/O, homography, line detection, undistortion, and drawing.
 - NumPy for coordinate transforms and geometry.
 - Ultralytics YOLO or another pretrained detector for person detection.
+- SciPy (`linear_sum_assignment`) for Hungarian assignment.
+- FilterPy or a custom Kalman filter implementation for track prediction.
 - Matplotlib or OpenCV for visualization.
 - Pandas for exporting tracking data.
 
@@ -169,18 +202,47 @@ Possible repository structure:
 data/
   film.mp4
   screenshot.jpg
+  distortion_params.json
+  frames/
+    frame_00000.jpg
+    ...
+    manifest.json
+  detections/
+    detections_raw.csv
+  tracks/
+    tracks_projected.csv
+  outputs/
+    topdown_demo.mp4
+    side_by_side.mp4
 src/
   extract_frames.py
+  lens_distortion.py
+  tune_distortion.py
   detect_players.py
   field_geometry.py
   homography.py
+  project_points.py
+  tracker.py
+  interpolate_tracks.py
+  export_tracks.py
   visualize.py
   pipeline.py
 notebooks/
+  lens_distortion_demo.ipynb
   prototype_homography.ipynb
+  tracking_debug.ipynb
 docs/
   project_plan.md
+  progress_update.md
 ```
+
+Module responsibilities (new files to add next):
+
+- `src/project_points.py`: convert detection anchor points from image space to field space.
+- `src/tracker.py`: track state, Kalman prediction, Hungarian assignment, lost/reactivate logic.
+- `src/interpolate_tracks.py`: short-gap interpolation with guardrails and `is_interpolated` flagging.
+- `src/export_tracks.py`: save per-frame outputs in a consistent schema for analysis and visualization.
+- `notebooks/tracking_debug.ipynb`: inspect ID switches, missed detections, and interpolation behavior.
 
 ## Validation Plan
 

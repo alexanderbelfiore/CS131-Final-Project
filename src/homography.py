@@ -66,12 +66,21 @@ def project_points(pixel_xys) -> np.ndarray:
 def project_detections(
     detections: list[dict],
     margin: float = 5.0,
+    exclusion_zones: list[tuple[float, float, float]] | None = None,
 ) -> list[dict]:
     """
-    Project each detection's foot pixel to field coords and discard
-    detections that land more than `margin` yards outside the field boundary.
+    Project each detection's foot pixel to field coords and discard detections
+    that land outside the field boundary or inside an exclusion zone.
 
-    Each returned dict contains all original detection keys plus:
+    Args:
+        detections:      list of detection dicts with a 'feet' (x, y) key.
+        margin:          yards beyond the field boundary still considered valid.
+        exclusion_zones: optional list of (x_yd, y_yd, radius_yd) tuples.
+                         Any detection projecting within radius_yd of a zone
+                         centre is dropped. Use this to suppress known
+                         spectators or non-players at fixed field locations.
+
+    Each returned dict contains all original keys plus:
         field_xy : (x_yd, y_yd) tuple
     """
     if not detections:
@@ -82,8 +91,14 @@ def project_detections(
 
     out = []
     for det, fxy in zip(detections, field_coords):
-        if is_on_field(fxy, margin=margin):
-            out.append({**det, "field_xy": tuple(fxy.tolist())})
+        if not is_on_field(fxy, margin=margin):
+            continue
+        if exclusion_zones and any(
+            float(np.hypot(fxy[0] - cx, fxy[1] - cy)) <= r
+            for cx, cy, r in exclusion_zones
+        ):
+            continue
+        out.append({**det, "field_xy": tuple(fxy.tolist())})
     return out
 
 
